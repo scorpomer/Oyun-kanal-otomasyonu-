@@ -68,6 +68,24 @@ def kur() -> None:
     print(f"Kaydedildi. Panel portu: {ayar['port']}")
 
 
+def kur_otomatik() -> None:
+    sifre = os.environ.get("PANEL_SIFRE", "")
+    if len(sifre) < 10:
+        raise SystemExit("PANEL_SIFRE ortam değişkeni en az 10 karakter olmalı.")
+    ayar = ayar_oku()
+    ayar.update(
+        port=int(os.environ.get("PANEL_PORT") or ayar.get("port", 8080)),
+        sifre_hash=generate_password_hash(sifre),
+        gizli_anahtar=ayar.get("gizli_anahtar") or secrets.token_hex(32),
+        ollama_model=ayar.get("ollama_model", "gemma3:1b"),
+        gemini_model=ayar.get("gemini_model", "gemini-2.5-flash"),
+    )
+    if os.environ.get("GEMINI_ANAHTAR"):
+        ayar["gemini_anahtar"] = os.environ["GEMINI_ANAHTAR"]
+    with open(AYAR_DOSYA, "w", encoding="utf-8") as f:
+        json.dump(ayar, f, ensure_ascii=False, indent=2)
+
+
 AYAR = ayar_oku()
 app = Flask(__name__)
 app.secret_key = AYAR.get("gizli_anahtar") or secrets.token_hex(32)
@@ -379,6 +397,9 @@ durum();setInterval(durum,10000);
 
 
 if __name__ == "__main__":
+    if "--kur-otomatik" in sys.argv:
+        kur_otomatik()
+        sys.exit(0)
     if "--kur" in sys.argv:
         kur()
         sys.exit(0)
