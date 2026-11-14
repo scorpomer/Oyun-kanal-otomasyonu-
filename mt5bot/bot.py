@@ -4,6 +4,8 @@ Strateji: EMA(9/21) kesişimi + RSI filtresi + ADX trend gücü
 Platform: Windows VDS + MetaTrader 5
 """
 
+import json
+import os
 import time
 import logging
 import sys
@@ -23,6 +25,9 @@ except ImportError:
 import config as C
 
 MAGIC = 202411
+DURUM_DOSYA = "durum.json"
+DURAKLAT_DOSYA = "DURAKLAT"
+KAPAT_DOSYA = "HEPSINI_KAPAT"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -248,6 +253,67 @@ def emir_gonder(symbol: str, yon: str, bakiye: float, atr: float) -> bool:
     return True
 
 
+def pozisyonlari_kapat() -> None:
+    for p in bot_pozisyonlari():
+        tick = mt5.symbol_info_tick(p.symbol)
+        if not tick:
+            continue
+        alis = p.type == mt5.POSITION_TYPE_BUY
+        istek = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": p.symbol,
+            "volume": p.volume,
+            "type": mt5.ORDER_TYPE_SELL if alis else mt5.ORDER_TYPE_BUY,
+            "position": p.ticket,
+            "price": tick.bid if alis else tick.ask,
+            "deviation": 20,
+            "magic": MAGIC,
+            "comment": "panel_kapat",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": doldurma_tipi(p.symbol),
+        }
+        sonuc = mt5.order_send(istek)
+        if sonuc is not None and sonuc.retcode == mt5.TRADE_RETCODE_DONE:
+            log.info("Panelden kapatıldı: %s #%s kâr=%.2f", p.symbol, p.ticket, p.profit)
+            tg(f"🧯 Panelden kapatıldı: {p.symbol} (kâr/zarar {p.profit:.2f})")
+        else:
+            log.error("Kapatılamadı: %s #%s %s", p.symbol, p.ticket, sonuc.comment if sonuc else mt5.last_error())
+
+
+def durum_yaz(**ek) -> None:
+    try:
+        d = {"zaman": time.time(), "zaman_metin": datetime.now().strftime("%d.%m.%Y %H:%M:%S")}
+        hesap = mt5.account_info()
+        if hesap is not None:
+            d.update(
+                hesap=hesap.login,
+                sunucu=hesap.server,
+                tur="DEMO" if hesap.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO else "GERÇEK",
+                bakiye=hesap.balance,
+                varlik=hesap.equity,
+                para=hesap.currency,
+            )
+            d["pozisyonlar"] = [
+                {
+                    "sembol": p.symbol,
+                    "yon": "BUY" if p.type == mt5.POSITION_TYPE_BUY else "SELL",
+                    "lot": p.volume,
+                    "giris": p.price_open,
+                    "sl": p.sl,
+                    "tp": p.tp,
+                    "kar": p.profit,
+                }
+                for p in bot_pozisyonlari()
+            ]
+        d.update(ek)
+        gecici = DURUM_DOSYA + ".tmp"
+        with open(gecici, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+        os.replace(gecici, DURUM_DOSYA)
+    except Exception:
+        log.exception("Durum dosyası yazılamadı.")
+
+
 class GunlukLimitKontrol:
     def __init__(self):
         self.gun: Optional[date] = None
@@ -291,12 +357,27 @@ def main():
         while True:
             try:
                 if not baglanti_saglam():
+                    durum_yaz(baglanti=False)
                     time.sleep(60)
                     continue
 
+                if os.path.exists(KAPAT_DOSYA):
+                    os.remove(KAPAT_DOSYA)
+                    pozisyonlari_kapat()
+
+                duraklatildi = os.path.exists(DURAKLAT_DOSYA)
                 hesap = mt5.account_info()
                 limit.guncelle(hesap.equity)
-                if limit.limit_asildi(hesap.equity):
+                limit_doldu = limit.limit_asildi(hesap.equity)
+                durum_yaz(
+                    baglanti=True,
+                    semboller=semboller,
+                    zaman_dilimi=C.TIMEFRAME,
+                    duraklatildi=duraklatildi,
+                    gunluk_limit_doldu=limit_doldu,
+                    gun_baslangic=limit.baslangic,
+                )
+                if duraklatildi or limit_doldu:
                     time.sleep(C.LOOP_SECONDS)
                     continue
 
