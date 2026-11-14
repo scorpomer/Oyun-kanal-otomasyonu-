@@ -22,20 +22,22 @@ except ImportError:
     print("Eksik kütüphane! Şunu çalıştırın:\n  pip install MetaTrader5 pandas numpy requests")
     sys.exit(1)
 
-import config as C
+# Gömülü Python (Wine kurulumu) betik klasörünü sys.path'e eklemez
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import config as C  # noqa: E402
 
 MAGIC = 202411
 DURUM_DOSYA = "durum.json"
 DURAKLAT_DOSYA = "DURAKLAT"
 KAPAT_DOSYA = "HEPSINI_KAPAT"
 
+_log_hedefleri = [logging.FileHandler(C.LOG_FILE, encoding="utf-8")]
+if not sys.executable.lower().endswith("pythonw.exe"):
+    _log_hedefleri.append(logging.StreamHandler())
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(C.LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
+    handlers=_log_hedefleri,
 )
 log = logging.getLogger(__name__)
 

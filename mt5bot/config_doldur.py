@@ -10,6 +10,7 @@ alanlar = {
     "MT5_LOGIN": ("MT5_LOGIN", int),
     "MT5_PASSWORD": ("MT5_PASSWORD", str),
     "MT5_SERVER": ("MT5_SERVER", str),
+    "MT5_PATH": ("MT5_PATH", str),
     "TG_TOKEN": ("TG_TOKEN", str),
 }
 for anahtar, (ortam, tur) in alanlar.items():
