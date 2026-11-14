@@ -8,6 +8,7 @@ import sys
 from dotenv import load_dotenv
 
 from content_automation import generate_content_plan, render_markdown
+from video_workflow import build_output, generate_workflow_output
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,6 +39,12 @@ def parse_args() -> argparse.Namespace:
         default="text",
         help="Çıktı formatı",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["plan", "script", "meta", "all"],
+        default="plan",
+        help="Üretilecek içerik tipi",
+    )
     return parser.parse_args()
 
 
@@ -46,20 +53,29 @@ def main() -> int:
     args = parse_args()
 
     api_key = os.getenv("GOOGLE_API_KEY")
-    plan = generate_content_plan(
-        game_name=args.game,
+
+    if args.output == "json":
+        workflow = generate_workflow_output(
+            game_name=args.game,
+            platform=args.platform,
+            style=args.style,
+            tone=args.tone,
+            duration_minutes=args.duration,
+            api_key=api_key,
+        )
+        print(json.dumps(workflow, ensure_ascii=False, indent=2))
+        return 0
+
+    output = build_output(
+        mode=args.mode,
+        game=args.game,
         platform=args.platform,
         style=args.style,
         tone=args.tone,
-        duration_minutes=args.duration,
+        duration=args.duration,
         api_key=api_key,
     )
-
-    if args.output == "json":
-        print(json.dumps(plan, ensure_ascii=False, indent=2))
-        return 0
-
-    print(render_markdown(plan))
+    print(output)
     return 0
 
 
