@@ -16,7 +16,7 @@ TG_CHAT_ID = "7606104858"
 
 # --- İŞLEM ---
 SYMBOLS   = ["XAUUSD", "EURUSD", "GBPUSD"]  # Broker ek kullanıyorsa: "XAUUSD.m" gibi
-TIMEFRAME = "M15"
+TIMEFRAME = "H1"          # M15 geriye dönük testte zarar etti; H1 + ADX 30 kârlı çıktı
 
 # --- RİSK YÖNETİMİ ---
 RISK_PER_TRADE  = 0.008   # İşlem başına sermayenin %0.8'i
@@ -32,7 +32,7 @@ EMA_SLOW   = 21
 RSI_PERIOD = 14
 RSI_OB     = 70
 RSI_OS     = 30
-ADX_MIN    = 20
+ADX_MIN    = 30
 
 LOOP_SECONDS = 30
 LOG_FILE     = "bot.log"
