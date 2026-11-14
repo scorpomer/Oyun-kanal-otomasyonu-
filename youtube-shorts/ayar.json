@@ -1,0 +1,42 @@
+{
+  "gizlilik": "public",
+  "yapay_zeka": "yerel",
+  "ses": {
+    "ad": "tr-TR-AhmetNeural",
+    "hiz": "+6%",
+    "perde": "+0Hz"
+  },
+  "kanal": {
+    "aciklama": "Türkiye'nin gündemini her gün kısa videolarla anlatıyoruz: spor, diziler, ünlüler ve teknoloji. Bilgiler haber kaynaklarına dayanır; kaynaklar her videonun açıklamasındadır.",
+    "anahtar_kelimeler": [
+      "gündem",
+      "haber",
+      "spor",
+      "futbol",
+      "dizi",
+      "magazin",
+      "teknoloji",
+      "shorts"
+    ],
+    "slogan": "Gündem her gün, kısa ve net",
+    "marka_uygula": true
+  },
+  "yorumlar": {
+    "yanitla": true,
+    "en_cok_yanit": 8,
+    "spam_beklet": true
+  },
+  "altyazi_yukle": true,
+  "zamanlama": {
+    "aktif": true,
+    "saatler": [
+      "09:00",
+      "18:00"
+    ],
+    "bitis": null,
+    "gunluk_en_cok": 6
+  },
+  "telegram": {
+    "sohbet_id": "7606104858"
+  }
+}

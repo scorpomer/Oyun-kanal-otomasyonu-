@@ -1,0 +1,128 @@
+name: Shorts otomasyonu
+
+# Zamanlamayı kontrol.yml yapar (ayar.json > zamanlama, Telegram: /saatler, /duraklat, /bitis).
+on:
+  workflow_dispatch:
+    inputs:
+      kuru:
+        description: "Sadece video üret, YouTube'a yükleme"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shorts
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: "1"   # kayıtlar çalışırken görünsün
+  OLLAMA_MODEL: qwen3:4b
+  OLLAMA_MODELS: /home/runner/.ollama/models
+
+jobs:
+  uret:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # Dalın en güncel hâli: eski bir çalıştırma yeniden başlatılsa da güncel kod ve güncel kayıt kullanılır
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: ffmpeg ve yazı tipi
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg fonts-dejavu-core
+
+      - run: pip install -r requirements.txt
+
+      - name: Testler
+        run: python -m unittest discover -s tests
+
+      # Ücretsiz, anahtarsız yapay zekâ: model GitHub sunucusunda (işlemciyle) çalışır.
+      - name: Model önbelleği
+        uses: actions/cache@v6
+        with:
+          path: /home/runner/.ollama/models
+          key: ollama-${{ env.OLLAMA_MODEL }}
+
+      # Yalnızca yedek: Gemini çalışıyorsa bu adımın hatası çalıştırmayı durdurmaz
+      - name: Ollama kur ve modeli hazırla
+        continue-on-error: true
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          sudo systemctl stop ollama 2>/dev/null || true
+          mkdir -p "$OLLAMA_MODELS"
+          nohup ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:11434/api/version && break; sleep 1; done
+          if ollama list | grep -q "^$OLLAMA_MODEL"; then echo "Model önbellekte"; exit 0; fi
+          for deneme in 1 2 3; do ollama pull "$OLLAMA_MODEL" && exit 0; sleep 20; done
+          exit 1
+
+      - name: Shorts üret
+        run: python -m shorts
+        env:
+          OLLAMA_URL: http://localhost:11434
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          KURU_CALISMA: ${{ inputs.kuru && '1' || '' }}
+          YT_GIZLILIK: private
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: shorts-${{ github.run_number }}
+          path: |
+            cikti/shorts.mp4
+            cikti/bilgi.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # Video kalıcı yedeği: 7 günlük artifact'in yanında her video kendi Release'inde kalır
+      - name: Videoyu kalıcı yedekle
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f cikti/shorts.mp4 ]; then
+            etiket="video-${{ github.run_number }}"
+            gh release create "$etiket" cikti/shorts.mp4 cikti/bilgi.json \
+              --title "Video #${{ github.run_number }}" \
+              --notes "Otomatik üretilen video ve bilgileri (yedek)." || true
+          fi
+
+      - name: Kaydı depoya yaz
+        run: |
+          git config user.name "shorts-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add yapilanlar.json
+          [ -f RAPOR.md ] && git add RAPOR.md
+          git diff --cached --quiet && exit 0
+          git commit -q -m "Shorts kaydı güncellendi"
+          git push -q && exit 0
+          # Depo bu sırada değişmiş (başka çalıştırma, kontrol ya da elle değişiklik): en güncel sürümü al,
+          # bu çalıştırmanın kaydını onunla birleştir ve yeniden gönder. Video kaydı asla kaybolmasın.
+          cp yapilanlar.json "$RUNNER_TEMP/yeni.json"
+          for deneme in 1 2 3 4 5; do
+            git fetch -q origin "$GITHUB_REF_NAME"
+            git reset -q --hard "origin/$GITHUB_REF_NAME"
+            python -m shorts.birlestir "$RUNNER_TEMP/yeni.json"
+            git add yapilanlar.json RAPOR.md
+            git diff --cached --quiet && exit 0
+            git commit -q -m "Shorts kaydı güncellendi"
+            git push -q && exit 0
+            sleep $((deneme * 7))
+          done
+          exit 1

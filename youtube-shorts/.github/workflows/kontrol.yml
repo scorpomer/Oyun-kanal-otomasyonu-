@@ -1,0 +1,48 @@
+name: Kontrol (Telegram ve zamanlama)
+
+# Saatte bir: Telegram komutlarını işler, zamanı gelen videoyu başlatır, hata veren üretimi bir kez
+# yeniden dener. Yalnızca Python standart kütüphanesi: kurulum yok, iş birkaç saniye sürer.
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # ayar.json / kontrol.json değişikliklerini yazmak için
+  actions: write    # shorts.yml üretimini başlatmak için
+
+concurrency:
+  group: kontrol
+  cancel-in-progress: false
+
+jobs:
+  kontrol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Kontrol
+        run: python3 -m shorts.kontrol
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # /kurulum denetimi için yalnızca "var mı" bilgisi (değerler buraya gelmez)
+          VAR_YOUTUBE: ${{ secrets.YT_CLIENT_ID != '' && secrets.YT_CLIENT_SECRET != '' && secrets.YT_REFRESH_TOKEN != '' }}
+          VAR_GEMINI: ${{ secrets.GEMINI_API_KEY != '' }}
+          VAR_PEXELS: ${{ secrets.PEXELS_API_KEY != '' }}
+
+      - name: Değişiklikleri yaz
+        run: |
+          git config user.name "shorts-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ayar.json kontrol.json 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -m "Kontrol: ayar/durum güncellendi"
+          for deneme in 1 2 3 4; do
+            git pull --rebase -q && git push -q && exit 0
+            git rebase --abort 2>/dev/null || true
+            sleep $((deneme * 5))
+          done
+          exit 1

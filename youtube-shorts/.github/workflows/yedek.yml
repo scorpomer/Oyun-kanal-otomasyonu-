@@ -1,0 +1,46 @@
+name: Haftalık yedek
+
+# Her Pazar (Türkiye saatiyle 10:00): kanal durumu, ayarlar, rapor ve marka dosyaları bir arşiv olarak
+# kalıcı bir Release'e konur. Video dosyaları shorts.yml tarafından ayrıca yedeklenir.
+on:
+  schedule:
+    - cron: "0 7 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  yedek:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Arşivi hazırla
+        id: arsiv
+        run: |
+          python3 -m shorts.yedek "$RUNNER_TEMP/yedek"
+          echo "ad=yedek-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Release olarak yayınla
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          etiket="${{ steps.arsiv.outputs.ad }}"
+          gh release create "$etiket" "$RUNNER_TEMP/yedek"/*.tar.gz \
+            --title "Haftalık yedek $etiket" \
+            --notes "Kanal durumu, ayarlar ve rapor. Geri yükleme: arşivi açıp dosyaları depoya kopyalayın." \
+            || gh release upload "$etiket" "$RUNNER_TEMP/yedek"/*.tar.gz --clobber
+
+      - name: Eski yedekleri temizle (son 12 hafta kalır)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 200 --json tagName,createdAt \
+            --jq '.[] | select(.tagName | startswith("yedek-")) | .tagName' \
+            | sort -r | tail -n +13 | while read -r etiket; do
+              gh release delete "$etiket" --yes --cleanup-tag || true
+            done

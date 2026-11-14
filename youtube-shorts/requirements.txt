@@ -1,0 +1,5 @@
+edge-tts>=7.3.1
+google-api-python-client>=2.100
+google-auth>=2.62.2
+# Çevrimdışı yedek ses (edge-tts ulaşılamazsa); anahtarsız
+piper-tts>=1.3
