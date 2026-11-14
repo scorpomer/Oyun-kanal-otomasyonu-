@@ -1,42 +1,38 @@
 # =====================================================
 #  MT5 SCALPER BOT — YAPILANDIRMA
-#  Tüm ayarları buradan değiştirin, koda dokunmayın
+#  Bu dosyayı yalnızca VDS'te doldurun. Şifre girilmiş halini
+#  asla GitHub'a yüklemeyin (depo herkese açık).
 # =====================================================
 
 # --- MT5 BAĞLANTI ---
-MT5_LOGIN    = 0          # MT5 hesap numaranız (integer)
+MT5_LOGIN    = 0          # MT5 hesap numaranız (sayı)
 MT5_PASSWORD = ""         # MT5 şifreniz
-MT5_SERVER   = ""         # Broker sunucusu, ör: "GCM-Demo" veya "ICMarkets-Demo"
+MT5_SERVER   = ""         # Broker sunucusu, ör: "GCM-Demo"
+MT5_PATH     = ""         # Boş bırakın; birden fazla MT5 varsa terminal64.exe yolu
 
-# --- TELEGRAM BİLDİRİM ---
-TG_TOKEN   = ""           # @BotFather'dan aldığınız token
-TG_CHAT_ID = "7606104858" # ayar.json'dan alındı
+# --- TELEGRAM BİLDİRİM (isteğe bağlı) ---
+TG_TOKEN   = ""           # @BotFather'dan alınan token
+TG_CHAT_ID = "7606104858"
 
-# --- İŞLEM PARAMETRELERİ ---
-SYMBOLS = [
-    "XAUUSD",   # Altın — en likit, spread düşük
-    "EURUSD",   # Euro/Dolar
-    "GBPUSD",   # Sterlin/Dolar
-]
-
-TIMEFRAME   = "M15"       # 15 dakikalık mum — scalping için ideal
-LOT_SIZE    = 0.01        # Minimum lot (500-2000 USDT için güvenli)
+# --- İŞLEM ---
+SYMBOLS   = ["XAUUSD", "EURUSD", "GBPUSD"]  # Broker ek kullanıyorsa: "XAUUSD.m" gibi
+TIMEFRAME = "M15"
 
 # --- RİSK YÖNETİMİ ---
-RISK_PER_TRADE  = 0.008   # Sermayenin %0.8'i / işlem
-STOP_LOSS_PIPS  = 20      # Stop-loss mesafesi (pip)
-TAKE_PROFIT_R   = 2.0     # Risk/ödül oranı (TP = SL × 2)
-MAX_DAILY_LOSS  = 0.03    # Günlük max zarar = sermayenin %3'ü → bot durur
-MAX_OPEN_TRADES = 3       # Aynı anda max açık işlem
+RISK_PER_TRADE  = 0.008   # İşlem başına sermayenin %0.8'i
+SL_ATR          = 1.5     # Stop-loss = ATR x 1.5
+TAKE_PROFIT_R   = 2.0     # Kâr hedefi = stop mesafesi x 2
+MAX_DAILY_LOSS  = 0.03    # Günlük %3 kayıpta o gün yeni işlem yok
+MAX_OPEN_TRADES = 3
+MAX_SPREAD_ATR  = 0.25    # Spread, ATR'nin %25'inden büyükse işlem açma
 
-# --- STRATEJİ PARAMETRELERİ ---
-EMA_FAST  = 9
-EMA_SLOW  = 21
+# --- STRATEJİ ---
+EMA_FAST   = 9
+EMA_SLOW   = 21
 RSI_PERIOD = 14
-RSI_OB    = 65   # Overbought — sat sinyali için üst sınır
-RSI_OS    = 35   # Oversold  — al sinyali için alt sınır
-ADX_MIN   = 20   # Trend gücü filtresi (ADX < 20 → işlem yapma)
+RSI_OB     = 70
+RSI_OS     = 30
+ADX_MIN    = 20
 
-# --- DÖNGÜ ---
-LOOP_SECONDS = 60         # Her kaç saniyede bir kontrol
+LOOP_SECONDS = 30
 LOG_FILE     = "bot.log"

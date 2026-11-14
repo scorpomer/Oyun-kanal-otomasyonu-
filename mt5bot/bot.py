@@ -7,8 +7,9 @@ Platform: Windows VDS + MetaTrader 5
 import time
 import logging
 import sys
-from datetime import datetime, date
+from datetime import date, datetime, timezone
 from typing import Optional
+
 import requests
 
 try:
@@ -21,7 +22,8 @@ except ImportError:
 
 import config as C
 
-# ── Loglama ──────────────────────────────────────────────────────────────────
+MAGIC = 202411
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -33,7 +35,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-# ── Telegram ─────────────────────────────────────────────────────────────────
 def tg(mesaj: str) -> None:
     if not C.TG_TOKEN:
         return
@@ -47,89 +48,102 @@ def tg(mesaj: str) -> None:
         pass
 
 
-# ── MT5 Bağlantı ─────────────────────────────────────────────────────────────
 def mt5_baglanti() -> bool:
-    if not mt5.initialize():
+    kw = {}
+    if C.MT5_LOGIN:
+        kw = {"login": C.MT5_LOGIN, "password": C.MT5_PASSWORD, "server": C.MT5_SERVER}
+    if getattr(C, "MT5_PATH", ""):
+        kw["path"] = C.MT5_PATH
+    if not mt5.initialize(**kw):
         log.error("MT5 başlatılamadı: %s", mt5.last_error())
         return False
-    if C.MT5_LOGIN:
-        ok = mt5.login(C.MT5_LOGIN, password=C.MT5_PASSWORD, server=C.MT5_SERVER)
-        if not ok:
-            log.error("MT5 giriş hatası: %s", mt5.last_error())
-            mt5.shutdown()
-            return False
-    log.info("MT5 bağlandı: hesap #%s", mt5.account_info().login if mt5.account_info() else "?")
+    info = mt5.account_info()
+    if info is None:
+        log.error("Hesap bilgisi alınamadı: %s", mt5.last_error())
+        mt5.shutdown()
+        return False
+    tur = "DEMO" if info.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO else "GERÇEK"
+    log.info("MT5 bağlandı: hesap #%s (%s) bakiye=%.2f %s", info.login, tur, info.balance, info.currency)
+    tg(f"🔌 MT5 bağlandı: #{info.login} ({tur})\nBakiye: {info.balance:.2f} {info.currency}")
     return True
 
 
-def hesap_bakiye() -> float:
-    info = mt5.account_info()
-    return info.balance if info else 0.0
+def baglanti_saglam() -> bool:
+    term = mt5.terminal_info()
+    if term is not None and term.connected and mt5.account_info() is not None:
+        return True
+    log.warning("MT5 bağlantısı koptu, yeniden bağlanılıyor...")
+    mt5.shutdown()
+    return mt5_baglanti()
 
 
-# ── İndikatörler ─────────────────────────────────────────────────────────────
+def sembolleri_hazirla() -> list:
+    hazir = []
+    for s in C.SYMBOLS:
+        if mt5.symbol_select(s, True) and mt5.symbol_info(s) is not None:
+            hazir.append(s)
+        else:
+            log.warning("Sembol bulunamadı: %s (broker farklı ad kullanıyor olabilir, ör: %s.m)", s, s)
+    if not hazir:
+        log.critical("Hiçbir sembol bulunamadı. config.py içindeki SYMBOLS listesini kontrol edin.")
+    return hazir
+
+
 TF_MAP = {
     "M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5,
     "M15": mt5.TIMEFRAME_M15, "M30": mt5.TIMEFRAME_M30,
     "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4,
 }
 
-def veri_al(symbol: str, n: int = 100) -> Optional[pd.DataFrame]:
+
+def veri_al(symbol: str, n: int = 200) -> Optional[pd.DataFrame]:
     tf = TF_MAP.get(C.TIMEFRAME, mt5.TIMEFRAME_M15)
     rates = mt5.copy_rates_from_pos(symbol, tf, 0, n)
-    if rates is None or len(rates) < 50:
+    if rates is None or len(rates) < 60:
         return None
     df = pd.DataFrame(rates)
     df["time"] = pd.to_datetime(df["time"], unit="s")
     return df
 
 
-def indikatör_hesapla(df: pd.DataFrame) -> pd.DataFrame:
-    c = df["close"]
+def indikator_hesapla(df: pd.DataFrame) -> pd.DataFrame:
+    c, high, low = df["close"], df["high"], df["low"]
 
     df["ema_fast"] = c.ewm(span=C.EMA_FAST, adjust=False).mean()
     df["ema_slow"] = c.ewm(span=C.EMA_SLOW, adjust=False).mean()
 
     delta = c.diff()
-    gain = delta.clip(lower=0).rolling(C.RSI_PERIOD).mean()
-    loss = (-delta.clip(upper=0)).rolling(C.RSI_PERIOD).mean()
+    gain = delta.clip(lower=0).ewm(alpha=1 / C.RSI_PERIOD, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / C.RSI_PERIOD, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
 
-    high, low = df["high"], df["low"]
-    prev_high, prev_low, prev_close = high.shift(1), low.shift(1), c.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    dm_pos = ((high - prev_high).clip(lower=0)).where(
-        (high - prev_high) > (prev_low - low), 0
-    )
-    dm_neg = ((prev_low - low).clip(lower=0)).where(
-        (prev_low - low) > (high - prev_high), 0
-    )
-    atr = tr.rolling(14).mean()
-    di_pos = 100 * dm_pos.rolling(14).mean() / atr.replace(0, np.nan)
-    di_neg = 100 * dm_neg.rolling(14).mean() / atr.replace(0, np.nan)
-    dx = (100 * (di_pos - di_neg).abs() / (di_pos + di_neg).replace(0, np.nan))
-    df["adx"] = dx.rolling(14).mean()
+    up = high.diff()
+    down = -low.diff()
+    dm_pos = up.where((up > down) & (up > 0), 0.0)
+    dm_neg = down.where((down > up) & (down > 0), 0.0)
+    tr = pd.concat([high - low, (high - c.shift()).abs(), (low - c.shift()).abs()], axis=1).max(axis=1)
+    a = 1 / 14
+    atr = tr.ewm(alpha=a, adjust=False).mean()
+    di_pos = 100 * dm_pos.ewm(alpha=a, adjust=False).mean() / atr.replace(0, np.nan)
+    di_neg = 100 * dm_neg.ewm(alpha=a, adjust=False).mean() / atr.replace(0, np.nan)
+    dx = 100 * (di_pos - di_neg).abs() / (di_pos + di_neg).replace(0, np.nan)
+    df["adx"] = dx.ewm(alpha=a, adjust=False).mean()
     df["atr"] = atr
-
     return df
 
 
-# ── Sinyal ───────────────────────────────────────────────────────────────────
 def sinyal_kontrol(df: pd.DataFrame) -> Optional[str]:
-    if len(df) < 2:
+    # Son satır henüz kapanmamış mum; yalnızca kapanmış mumlara bakılır
+    cur, prv = df.iloc[-2], df.iloc[-3]
+    if pd.isna(cur["adx"]) or pd.isna(cur["rsi"]):
         return None
-    cur, prv = df.iloc[-1], df.iloc[-2]
 
     adx_ok = cur["adx"] >= C.ADX_MIN
-    ema_buy  = prv["ema_fast"] < prv["ema_slow"] and cur["ema_fast"] > cur["ema_slow"]
-    ema_sell = prv["ema_fast"] > prv["ema_slow"] and cur["ema_fast"] < cur["ema_slow"]
-    rsi_buy  = C.RSI_OS < cur["rsi"] < 55
-    rsi_sell = 45 < cur["rsi"] < C.RSI_OB
+    ema_buy = prv["ema_fast"] <= prv["ema_slow"] and cur["ema_fast"] > cur["ema_slow"]
+    ema_sell = prv["ema_fast"] >= prv["ema_slow"] and cur["ema_fast"] < cur["ema_slow"]
+    rsi_buy = C.RSI_OS < cur["rsi"] < C.RSI_OB
+    rsi_sell = C.RSI_OS < cur["rsi"] < C.RSI_OB
 
     if adx_ok and ema_buy and rsi_buy:
         return "BUY"
@@ -138,146 +152,180 @@ def sinyal_kontrol(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
-# ── Pozisyon Yönetimi ─────────────────────────────────────────────────────────
-def acik_pozisyon_say() -> int:
-    pos = mt5.positions_get()
-    return len(pos) if pos else 0
+def bot_pozisyonlari(symbol: Optional[str] = None) -> list:
+    pos = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+    return [p for p in (pos or []) if p.magic == MAGIC]
 
 
-def sembol_pozisyon_var_mi(symbol: str) -> bool:
-    pos = mt5.positions_get(symbol=symbol)
-    return bool(pos)
+def lot_hesapla(symbol: str, sl_mesafe: float, bakiye: float) -> Optional[float]:
+    info = mt5.symbol_info(symbol)
+    if not info or info.trade_tick_size <= 0 or info.trade_tick_value <= 0:
+        return None
+    lot_basina_risk = (sl_mesafe / info.trade_tick_size) * info.trade_tick_value
+    if lot_basina_risk <= 0:
+        return None
+    lot = (bakiye * C.RISK_PER_TRADE) / lot_basina_risk
+    adim = info.volume_step
+    lot = int(lot / adim) * adim
+    if lot < info.volume_min:
+        gercek_risk = info.volume_min * lot_basina_risk / bakiye
+        if gercek_risk > C.RISK_PER_TRADE * 2:
+            log.info("%s: minimum lot bile riski aşıyor (%%%.2f), işlem atlandı.", symbol, gercek_risk * 100)
+            return None
+        lot = info.volume_min
+    lot = min(lot, info.volume_max)
+    return round(lot, 2)
 
 
-def lot_hesapla(symbol: str, sl_pips: float, bakiye: float) -> float:
-    risk_tutar = bakiye * C.RISK_PER_TRADE
-    sym_info = mt5.symbol_info(symbol)
-    if not sym_info:
-        return C.LOT_SIZE
-    pip_deger = sym_info.trade_tick_value * (sl_pips / sym_info.trade_tick_size / 10)
-    if pip_deger <= 0:
-        return C.LOT_SIZE
-    lot = risk_tutar / pip_deger
-    lot = max(sym_info.volume_min, round(lot / sym_info.volume_step) * sym_info.volume_step)
-    lot = min(lot, sym_info.volume_max)
-    return lot
+def doldurma_tipi(symbol: str) -> int:
+    fm = mt5.symbol_info(symbol).filling_mode
+    if fm & 1:
+        return mt5.ORDER_FILLING_FOK
+    if fm & 2:
+        return mt5.ORDER_FILLING_IOC
+    return mt5.ORDER_FILLING_RETURN
+
+
+def spread_uygun(symbol: str, atr: float) -> bool:
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        return False
+    spread = tick.ask - tick.bid
+    return spread <= atr * C.MAX_SPREAD_ATR
 
 
 def emir_gonder(symbol: str, yon: str, bakiye: float, atr: float) -> bool:
-    sym_info = mt5.symbol_info_tick(symbol)
-    if not sym_info:
+    tick = mt5.symbol_info_tick(symbol)
+    info = mt5.symbol_info(symbol)
+    if not tick or not info:
         return False
 
-    if yon == "BUY":
-        fiyat = sym_info.ask
-        sl    = fiyat - atr * 1.5
-        tp    = fiyat + atr * 1.5 * C.TAKE_PROFIT_R
-        order_type = mt5.ORDER_TYPE_BUY
-    else:
-        fiyat = sym_info.bid
-        sl    = fiyat + atr * 1.5
-        tp    = fiyat - atr * 1.5 * C.TAKE_PROFIT_R
-        order_type = mt5.ORDER_TYPE_SELL
+    sl_mesafe = atr * C.SL_ATR
+    min_mesafe = info.trade_stops_level * info.point
+    sl_mesafe = max(sl_mesafe, min_mesafe * 1.5)
+    tp_mesafe = sl_mesafe * C.TAKE_PROFIT_R
 
-    sl_pips = abs(fiyat - sl) / mt5.symbol_info(symbol).point / 10
-    lot = lot_hesapla(symbol, sl_pips, bakiye)
+    if yon == "BUY":
+        fiyat, order_type = tick.ask, mt5.ORDER_TYPE_BUY
+        sl, tp = fiyat - sl_mesafe, fiyat + tp_mesafe
+    else:
+        fiyat, order_type = tick.bid, mt5.ORDER_TYPE_SELL
+        sl, tp = fiyat + sl_mesafe, fiyat - tp_mesafe
+
+    lot = lot_hesapla(symbol, sl_mesafe, bakiye)
+    if lot is None:
+        return False
 
     istek = {
-        "action":   mt5.TRADE_ACTION_DEAL,
-        "symbol":   symbol,
-        "volume":   lot,
-        "type":     order_type,
-        "price":    fiyat,
-        "sl":       round(sl, mt5.symbol_info(symbol).digits),
-        "tp":       round(tp, mt5.symbol_info(symbol).digits),
-        "magic":    202411,
-        "comment":  "scalper_bot",
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": lot,
+        "type": order_type,
+        "price": fiyat,
+        "sl": round(sl, info.digits),
+        "tp": round(tp, info.digits),
+        "deviation": 20,
+        "magic": MAGIC,
+        "comment": "scalper_bot",
         "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
+        "type_filling": doldurma_tipi(symbol),
     }
 
     sonuc = mt5.order_send(istek)
-    if sonuc.retcode == mt5.TRADE_RETCODE_DONE:
-        mesaj = (
-            f"✅ <b>{yon}</b> {symbol}\n"
-            f"💰 Lot: {lot} | Fiyat: {fiyat:.5f}\n"
-            f"🛡 SL: {istek['sl']:.5f} | 🎯 TP: {istek['tp']:.5f}"
-        )
-        log.info("İşlem açıldı: %s %s @%.5f lot=%.2f", yon, symbol, fiyat, lot)
-        tg(mesaj)
-        return True
-    else:
-        log.warning("Emir reddedildi: %s retcode=%s", symbol, sonuc.retcode)
+    if sonuc is None:
+        log.error("Emir gönderilemedi: %s %s", symbol, mt5.last_error())
+        return False
+    if sonuc.retcode != mt5.TRADE_RETCODE_DONE:
+        log.warning("Emir reddedildi: %s retcode=%s (%s)", symbol, sonuc.retcode, sonuc.comment)
+        return False
+
+    log.info("İşlem açıldı: %s %s @%s lot=%.2f SL=%s TP=%s", yon, symbol, fiyat, lot, istek["sl"], istek["tp"])
+    tg(
+        f"✅ <b>{yon}</b> {symbol}\n"
+        f"Lot: {lot} | Fiyat: {fiyat}\n"
+        f"SL: {istek['sl']} | TP: {istek['tp']}"
+    )
+    return True
+
+
+class GunlukLimitKontrol:
+    def __init__(self):
+        self.gun: Optional[date] = None
+        self.baslangic: Optional[float] = None
+        self.bildirildi = False
+
+    def guncelle(self, equity: float):
+        bugun = datetime.now(timezone.utc).date()
+        if bugun != self.gun:
+            self.gun = bugun
+            self.baslangic = equity
+            self.bildirildi = False
+            log.info("Yeni gün — başlangıç varlığı: %.2f", equity)
+
+    def limit_asildi(self, equity: float) -> bool:
+        kayip = (self.baslangic - equity) / self.baslangic
+        if kayip >= C.MAX_DAILY_LOSS:
+            if not self.bildirildi:
+                log.warning("Günlük zarar limiti aşıldı (%%%.2f). Bugün yeni işlem yok.", kayip * 100)
+                tg(f"⛔ Günlük zarar limiti aşıldı (%{kayip * 100:.2f}). Bot bugün yeni işlem açmayacak.")
+                self.bildirildi = True
+            return True
         return False
 
 
-# ── Günlük Zarar Limiti ───────────────────────────────────────────────────────
-class GunlukLimitKontrol:
-    def __init__(self):
-        self.gun = date.today()
-        self.baslangic_bakiye: Optional[float] = None
-
-    def guncelle(self, bakiye: float):
-        bugun = date.today()
-        if bugun != self.gun:
-            self.gun = bugun
-            self.baslangic_bakiye = bakiye
-            log.info("Yeni gün — başlangıç bakiyesi: %.2f", bakiye)
-        if self.baslangic_bakiye is None:
-            self.baslangic_bakiye = bakiye
-
-    def limit_asimdi(self, bakiye: float) -> bool:
-        if self.baslangic_bakiye is None:
-            return False
-        kayip_oran = (self.baslangic_bakiye - bakiye) / self.baslangic_bakiye
-        return kayip_oran >= C.MAX_DAILY_LOSS
-
-
-# ── Ana Döngü ─────────────────────────────────────────────────────────────────
 def main():
     log.info("=== MT5 Scalper Bot Başlıyor ===")
-    tg("🤖 <b>MT5 Scalper Bot başladı</b>\nSemboller: " + ", ".join(C.SYMBOLS))
+    while not mt5_baglanti():
+        log.info("60 saniye sonra tekrar denenecek...")
+        time.sleep(60)
 
-    if not mt5_baglanti():
-        log.critical("MT5 bağlantısı kurulamadı. Bot durdu.")
+    semboller = sembolleri_hazirla()
+    if not semboller:
         sys.exit(1)
+    tg("🤖 <b>MT5 Scalper Bot başladı</b>\nSemboller: " + ", ".join(semboller))
 
     limit = GunlukLimitKontrol()
+    son_mum = {}
 
     try:
         while True:
-            bakiye = hesap_bakiye()
-            if bakiye == 0:
-                log.error("Bakiye alınamadı, 30s bekleniyor.")
-                time.sleep(30)
-                continue
-
-            limit.guncelle(bakiye)
-
-            if limit.limit_asimdi(bakiye):
-                log.warning("⛔ Günlük zarar limiti aşıldı. İşlem yok.")
-                tg("⛔ Günlük zarar limiti aşıldı. Bot bugün işlem açmayacak.")
-                time.sleep(300)
-                continue
-
-            if acik_pozisyon_say() >= C.MAX_OPEN_TRADES:
-                time.sleep(C.LOOP_SECONDS)
-                continue
-
-            for symbol in C.SYMBOLS:
-                if sembol_pozisyon_var_mi(symbol):
+            try:
+                if not baglanti_saglam():
+                    time.sleep(60)
                     continue
 
-                df = veri_al(symbol)
-                if df is None:
+                hesap = mt5.account_info()
+                limit.guncelle(hesap.equity)
+                if limit.limit_asildi(hesap.equity):
+                    time.sleep(C.LOOP_SECONDS)
                     continue
 
-                df = indikatör_hesapla(df)
-                sinyal = sinyal_kontrol(df)
+                if len(bot_pozisyonlari()) >= C.MAX_OPEN_TRADES:
+                    time.sleep(C.LOOP_SECONDS)
+                    continue
 
-                if sinyal:
-                    atr = df.iloc[-1]["atr"]
-                    emir_gonder(symbol, sinyal, bakiye, atr)
+                for symbol in semboller:
+                    if bot_pozisyonlari(symbol):
+                        continue
+                    df = veri_al(symbol)
+                    if df is None:
+                        continue
+                    kapanan_mum = df.iloc[-2]["time"]
+                    if son_mum.get(symbol) == kapanan_mum:
+                        continue
+                    son_mum[symbol] = kapanan_mum
+
+                    df = indikator_hesapla(df)
+                    sinyal = sinyal_kontrol(df)
+                    if not sinyal:
+                        continue
+                    atr = df.iloc[-2]["atr"]
+                    if not spread_uygun(symbol, atr):
+                        log.info("%s: spread çok yüksek, sinyal atlandı.", symbol)
+                        continue
+                    emir_gonder(symbol, sinyal, hesap.balance, atr)
+            except Exception:
+                log.exception("Döngüde beklenmeyen hata, devam ediliyor.")
 
             time.sleep(C.LOOP_SECONDS)
 
