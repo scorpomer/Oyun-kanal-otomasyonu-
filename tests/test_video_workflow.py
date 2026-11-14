@@ -1,40 +1,63 @@
-# Oyun-kanal-otomasyonu-
-YouTube oyun kanalı için yapay zeka içerik otomasyonu.
+from video_workflow import (
+    build_output,
+    build_script_lines,
+    build_youtube_metadata,
+    generate_workflow_output,
+)
 
-## Hızlı Başlangıç
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# .env dosyasına Google API anahtarınızı ekleyin
-python app.py --game "CS2" --platform "PC" --duration 8
-```
+def test_build_script_lines_includes_intro_and_cta():
+    lines = build_script_lines(
+        game_name="Elden Ring",
+        platform="PS5",
+        tone="analitik",
+        style="akıcı",
+        duration_minutes=10,
+    )
+    assert len(lines) >= 3
+    assert "Elden Ring" in lines[0]
+    assert "PS5" in lines[0]
+    assert "Yorumlarda" in lines[-1]
 
-## Özellikler
 
-- Oyun başlığı ve platform bazlı içerik planı üretir
-- Video açılış cümlesi, özet, akış ve CTA hazırlar
-- Google Gemini API key mevcutsa canlı içerik planı denemesi yapar
-- API key yoksa yerel akıllı fallback çalışır
-- Artık video scripti ve YouTube meta bilgileri üretebilir
+def test_build_youtube_metadata_contains_expected_fields():
+    meta = build_youtube_metadata(
+        game_name="Helldivers 2",
+        platform="PC",
+        style="eğlenceli",
+        duration_minutes=8,
+    )
+    assert "Helldivers 2" in meta["title"]
+    assert "PC" in meta["title"]
+    assert meta["description"]
+    assert "oyun incelemesi" in meta["tags"]
 
-## Yeni kullanım örnekleri
 
-```bash
-python app.py --game "Helldivers 2" --platform "PC" --style "eğlenceli ve hızlı" --tone "heyecanlı" --mode plan
-python app.py --game "Zelda" --platform "Switch" --mode script
-python app.py --game "Elden Ring" --platform "PC" --mode meta --output json
-python app.py --game "Stardew Valley" --platform "PC" --mode all
-```
+def test_generate_workflow_output_builds_text_blocks():
+    output = generate_workflow_output(
+        game_name="Stardew Valley",
+        platform="PC",
+        style="samimi",
+        tone="sakin",
+        duration_minutes=6,
+        api_key=None,
+    )
+    assert output["plan"]["title"]
+    assert output["script_lines"]
+    assert output["script_text"].startswith("1.")
+    assert "Title:" in output["youtube_meta_text"]
 
-## Geliştirme aşaması
 
-Projede şu alanlar genişletilebilir:
-
-- oyun verilerinin otomatik çekilmesi
-- konu başlığı ve thumbnail önerileri
-- video seslendirme scripti üretimi
-- otomatik YouTube açıklaması + hashtag üretimi
-- web arayüzü (Streamlit / Flask)
+def test_build_output_supports_all_modes():
+    common = {
+        "game": "CS2",
+        "platform": "PC",
+        "style": "hızlı",
+        "tone": "heyecanlı",
+        "duration": 8,
+        "api_key": None,
+    }
+    assert build_output(mode="plan", **common).startswith("# ")
+    assert build_output(mode="script", **common).startswith("1.")
+    assert build_output(mode="meta", **common).startswith("Title:")
+    assert "\n\n---\n\n" in build_output(mode="all", **common)
