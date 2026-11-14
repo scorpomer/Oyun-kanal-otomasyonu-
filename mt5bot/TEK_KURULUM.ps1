@@ -11,8 +11,12 @@ $BOT_DIR = "C:\mt5bot"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ProgressPreference = "SilentlyContinue"
 
+# KURULUM_OTOMATIK=1 ise sorular sorulmaz, cevaplar ortam degiskenlerinden okunur (Termux/WinRM ile uzaktan kurulum)
+$OTO = $env:KURULUM_OTOMATIK -eq "1"
+
 # Yonetici degilse kendini yonetici olarak yeniden baslat
 $yonetici = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $yonetici -and $OTO) { throw "Uzak oturum yonetici yetkisine sahip degil." }
 if (-not $yonetici) {
     Write-Host "Yonetici izni gerekiyor, yeni pencere aciliyor..." -ForegroundColor Yellow
     Start-Process powershell -Verb RunAs -ArgumentList "-NoExit -ExecutionPolicy Bypass -Command `"irm $KURULUM_URL | iex`""
@@ -33,21 +37,33 @@ function DuzMetin($guvenli) {
     try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
 }
 
-Clear-Host
-Write-Host "==============================================" -ForegroundColor Cyan
-Write-Host "   MT5 BOT - TAM OTOMATIK KURULUM" -ForegroundColor Cyan
-Write-Host "==============================================" -ForegroundColor Cyan
-Write-Host "Once birkac soru soracagim, sonra kurulum kendi kendine biter (15-30 dk)."
-Write-Host "Bilmediginiz soruyu Enter ile gecebilirsiniz; sonradan panelden/dosyadan eklenir.`n"
+if ($OTO) {
+    $MT5_LOGIN  = $env:K_MT5_LOGIN
+    $MT5_SIFRE  = $env:K_MT5_SIFRE
+    $MT5_SUNUCU = $env:K_MT5_SUNUCU
+    $GEMINI     = $env:K_GEMINI
+    $TG         = $env:K_TG
+    $IP_KISIT   = $env:K_IP_KISIT
+    $WIN_SIFRE  = $env:K_WIN_SIFRE
+    Remove-Item Env:K_MT5_SIFRE, Env:K_WIN_SIFRE, Env:K_GEMINI, Env:K_TG -ErrorAction SilentlyContinue
+    Write-Host "Uzaktan otomatik kurulum basladi (15-30 dk)." -ForegroundColor Cyan
+} else {
+    try { Clear-Host } catch { }
+    Write-Host "==============================================" -ForegroundColor Cyan
+    Write-Host "   MT5 BOT - TAM OTOMATIK KURULUM" -ForegroundColor Cyan
+    Write-Host "==============================================" -ForegroundColor Cyan
+    Write-Host "Once birkac soru soracagim, sonra kurulum kendi kendine biter (15-30 dk)."
+    Write-Host "Bilmediginiz soruyu Enter ile gecebilirsiniz; sonradan panelden/dosyadan eklenir.`n"
 
-$MT5_LOGIN  = Read-Host "1) MT5 hesap numarasi (demo hesap onerilir)"
-$MT5_SIFRE  = DuzMetin (Read-Host "2) MT5 sifresi" -AsSecureString)
-$MT5_SUNUCU = Read-Host "3) MT5 sunucu adi (or: GCM-Demo)"
-$GEMINI     = Read-Host "4) Gemini API anahtari (yoksa Enter; yerel yapay zeka kurulur)"
-$TG         = Read-Host "5) Telegram bot token (yoksa Enter)"
-$IP_KISIT   = Read-Host "6) Panele sadece su IP'den erisilsin (onerilir; herkese acik icin Enter)"
-Write-Host "7) Sunucu yeniden baslarsa her seyin kendiliginden acilmasi icin Windows"
-$WIN_SIFRE  = DuzMetin (Read-Host "   Administrator sifresini girin (istemiyorsaniz Enter)" -AsSecureString)
+    $MT5_LOGIN  = Read-Host "1) MT5 hesap numarasi (demo hesap onerilir)"
+    $MT5_SIFRE  = DuzMetin (Read-Host "2) MT5 sifresi" -AsSecureString)
+    $MT5_SUNUCU = Read-Host "3) MT5 sunucu adi (or: GCM-Demo)"
+    $GEMINI     = Read-Host "4) Gemini API anahtari (yoksa Enter; yerel yapay zeka kurulur)"
+    $TG         = Read-Host "5) Telegram bot token (yoksa Enter)"
+    $IP_KISIT   = Read-Host "6) Panele sadece su IP'den erisilsin (onerilir; herkese acik icin Enter)"
+    Write-Host "7) Sunucu yeniden baslarsa her seyin kendiliginden acilmasi icin Windows"
+    $WIN_SIFRE  = DuzMetin (Read-Host "   Administrator sifresini girin (istemiyorsaniz Enter)" -AsSecureString)
+}
 
 $harfler = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
 $PANEL_SIFRE = -join (1..14 | ForEach-Object { $harfler[(Get-Random -Maximum $harfler.Length)] })
@@ -56,8 +72,9 @@ $PANEL_PORT = 8080
 Write-Host "`nTesekkurler. Kurulum basliyor, bilgisayarin basindan kalkabilirsiniz." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $BOT_DIR | Out-Null
 $gunlukKapali = $false
-Start-Transcript -Path "$BOT_DIR\kurulum.log" -Append | Out-Null
+try { Start-Transcript -Path "$BOT_DIR\kurulum.log" -Append | Out-Null } catch { $gunlukKapali = $true }
 $ErrorActionPreference = "Stop"
+$otoOturum = $false
 
 try {
     Adim 1 "Python"
@@ -165,6 +182,7 @@ goto dongu
         Indir "https://live.sysinternals.com/Autologon64.exe" "$BOT_DIR\Autologon64.exe"
         & "$BOT_DIR\Autologon64.exe" /accepteula $env:USERNAME $env:COMPUTERNAME $WIN_SIFRE | Out-Null
         Remove-Item "$BOT_DIR\Autologon64.exe" -ErrorAction SilentlyContinue
+        $otoOturum = $true
         Tamam "Sunucu yeniden baslarsa otomatik oturum acilip bot baslayacak"
     } else {
         Write-Host "      Atlandi. Sunucu yeniden baslarsa bir kez RDP ile giris yapmaniz gerekir." -ForegroundColor DarkGray
@@ -175,8 +193,8 @@ goto dongu
     Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
         Where-Object { $_.CommandLine -like "*bot.py*" -or $_.CommandLine -like "*panel.py*" } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    Start-ScheduledTask -TaskName "MT5ScalperBot"
-    Start-ScheduledTask -TaskName "MT5BotPaneli"
+    # Gorevler etkilesimli oturum ister; uzak oturumda kimse giris yapmamissa baslamayabilir
+    try { Start-ScheduledTask -TaskName "MT5ScalperBot"; Start-ScheduledTask -TaskName "MT5BotPaneli" } catch { }
     Start-Sleep -Seconds 8
     $panelOk = $false
     try { Invoke-WebRequest -Uri "http://127.0.0.1:$PANEL_PORT" -UseBasicParsing -TimeoutSec 5 | Out-Null; $panelOk = $true } catch { }
@@ -191,7 +209,7 @@ Sifre : $PANEL_SIFRE
     $bilgi | Set-Content -Path "$([Environment]::GetFolderPath('Desktop'))\PANEL_BILGI.txt" -Encoding UTF8
 
     # Sifre ekrana yazilmadan once gunluk kapatilir; gunluk paylasilabilir kalsin
-    Stop-Transcript | Out-Null; $gunlukKapali = $true
+    if (-not $gunlukKapali) { Stop-Transcript | Out-Null; $gunlukKapali = $true }
     Write-Host "`n==============================================" -ForegroundColor Green
     Write-Host "   KURULUM TAMAMLANDI" -ForegroundColor Green
     Write-Host "==============================================" -ForegroundColor Green
@@ -199,6 +217,12 @@ Sifre : $PANEL_SIFRE
     if (-not $panelOk) { Write-Host "Panel henuz yanit vermedi; 1 dakika sonra adresi deneyin. Sorun olursa C:\mt5bot\panel.log dosyasina bakin." -ForegroundColor Yellow }
     if (-not $MT5_LOGIN) { Write-Host "MT5 hesap bilgisi girilmedi: C:\mt5bot\config.py dosyasini doldurun, bot kendiliginden baglanir." -ForegroundColor Yellow }
     Write-Host "Bilgiler masaustundeki PANEL_BILGI.txt dosyasina da yazildi." -ForegroundColor Cyan
+    if ($OTO -and $env:K_YENIDEN_BASLAT -eq "1" -and $otoOturum) {
+        Write-Host "Sunucu 1 dakika icinde yeniden baslatiliyor; acilinca bot ve panel kendiliginden calisacak." -ForegroundColor Cyan
+        shutdown.exe /r /t 60 /c "MT5 bot kurulumu tamamlandi" | Out-Null
+    } elseif (-not $panelOk) {
+        Write-Host "Bot ve panel, Administrator ilk kez oturum actiginda baslayacak." -ForegroundColor Yellow
+    }
 }
 catch {
     Write-Host "`nHATA: $_" -ForegroundColor Red
