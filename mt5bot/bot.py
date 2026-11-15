@@ -22,9 +22,12 @@ except ImportError:
     print("Eksik kütüphane! Şunu çalıştırın:\n  pip install MetaTrader5 pandas numpy requests")
     sys.exit(1)
 
-# Gömülü Python (Wine kurulumu) betik klasörünü sys.path'e eklemez
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import config as C  # noqa: E402
+import runpy  # noqa: E402
+import types  # noqa: E402
+
+# config.py .pyc önbelleği olmadan okunur: panel aynı saniyede aynı uzunlukta
+# bir değer yazarsa önbellek eski ayarı döndürebiliyordu
+C = types.SimpleNamespace(**runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")))
 
 MAGIC = 202411
 DURUM_DOSYA = "durum.json"
@@ -341,11 +344,29 @@ class GunlukLimitKontrol:
         return False
 
 
+CONFIG_YOLU = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+_config_zamani = os.path.getmtime(CONFIG_YOLU)
+
+
+def ayarlar_degisti_mi() -> bool:
+    # Panelden ayar değişince çık; başlatma döngüsü botu yeni ayarlarla açar
+    if os.path.getmtime(CONFIG_YOLU) != _config_zamani:
+        log.info("Ayarlar değişti, bot yeni ayarlarla yeniden başlatılıyor.")
+        return True
+    return False
+
+
 def main():
     log.info("=== MT5 Scalper Bot Başlıyor ===")
+    if not C.MT5_LOGIN:
+        log.warning("MT5 hesap bilgisi girilmemiş. Panelin 'Ayarlar' sekmesinden girin.")
     while not mt5_baglanti():
-        log.info("60 saniye sonra tekrar denenecek...")
-        time.sleep(60)
+        durum_yaz(baglanti=False, hesap_bilgisi_var=bool(C.MT5_LOGIN))
+        for _ in range(6):
+            time.sleep(10)
+            if ayarlar_degisti_mi():
+                sys.exit(0)
+        log.info("Tekrar deneniyor...")
 
     semboller = sembolleri_hazirla()
     if not semboller:
@@ -357,6 +378,8 @@ def main():
 
     try:
         while True:
+            if ayarlar_degisti_mi():
+                break
             try:
                 if not baglanti_saglam():
                     durum_yaz(baglanti=False)

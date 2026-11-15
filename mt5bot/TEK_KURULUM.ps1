@@ -52,21 +52,16 @@ if ($OTO) {
     Write-Host "==============================================" -ForegroundColor Cyan
     Write-Host "   MT5 BOT - TAM OTOMATIK KURULUM" -ForegroundColor Cyan
     Write-Host "==============================================" -ForegroundColor Cyan
-    Write-Host "Once birkac soru soracagim, sonra kurulum kendi kendine biter (15-30 dk)."
-    Write-Host "Bilmediginiz soruyu Enter ile gecebilirsiniz; sonradan panelden/dosyadan eklenir.`n"
+    Write-Host "Tek bir soru var, sonra kurulum kendi kendine biter (15-30 dk)."
+    Write-Host "MT5 hesabi, Gemini ve Telegram bilgileri kurulumdan sonra panelin 'Ayarlar' sekmesinden girilir.`n"
 
-    $MT5_LOGIN  = Read-Host "1) MT5 hesap numarasi (demo hesap onerilir)"
-    $MT5_SIFRE  = DuzMetin (Read-Host "2) MT5 sifresi" -AsSecureString)
-    $MT5_SUNUCU = Read-Host "3) MT5 sunucu adi (or: GCM-Demo)"
-    $GEMINI     = Read-Host "4) Gemini API anahtari (yoksa Enter; yerel yapay zeka kurulur)"
-    $TG         = Read-Host "5) Telegram bot token (yoksa Enter)"
-    $IP_KISIT   = Read-Host "6) Panele sadece su IP'den erisilsin (bos birakilirsa yalnizca localhost)"
-    Write-Host "7) Sunucu yeniden baslarsa her seyin kendiliginden acilmasi icin Windows"
-    $WIN_SIFRE  = DuzMetin (Read-Host "   Administrator sifresini girin (istemiyorsaniz Enter)" -AsSecureString)
+    $MT5_LOGIN = ""; $MT5_SIFRE = ""; $MT5_SUNUCU = ""; $GEMINI = ""; $TG = ""; $IP_KISIT = ""
+    Write-Host "Sunucu yeniden baslarsa botun kendiliginden acilmasi icin Windows (Administrator)"
+    $WIN_SIFRE  = DuzMetin (Read-Host "sifresini girin; istemiyorsaniz sadece Enter'a basin" -AsSecureString)
 }
 
 $harfler = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
-$PANEL_SIFRE = -join (1..14 | ForEach-Object { $harfler[[System.Security.Cryptography.RandomNumberGenerator]::GetInt32($harfler.Length)] })
+$PANEL_SIFRE = -join (1..14 | ForEach-Object { $harfler[(Get-Random -Maximum $harfler.Length)] })
 $PANEL_PORT = 8080
 
 Write-Host "`nTesekkurler. Kurulum basliyor, bilgisayarin basindan kalkabilirsiniz." -ForegroundColor Cyan
@@ -151,16 +146,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Panel ayarlanamadi." }
     Remove-Item Env:PANEL_SIFRE, Env:GEMINI_ANAHTAR -ErrorAction SilentlyContinue
     Get-NetFirewallRule -DisplayName "MT5 Bot Paneli" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-    Write-Host "      Panel HTTP kullanir; uzaktan erisim icin HTTPS proxy veya SSH/RDP tuneli kullanin." -ForegroundColor Yellow
-    $IP_KISIT = "$IP_KISIT".Trim()
     if ($IP_KISIT) {
         New-NetFirewallRule -DisplayName "MT5 Bot Paneli" -Direction Inbound -Protocol TCP -LocalPort $PANEL_PORT -RemoteAddress $IP_KISIT -Action Allow | Out-Null
     } else {
-        $IP_KISIT = "127.0.0.1"
-        New-NetFirewallRule -DisplayName "MT5 Bot Paneli" -Direction Inbound -Protocol TCP -LocalPort $PANEL_PORT -RemoteAddress $IP_KISIT -Action Allow | Out-Null
-        Write-Host "      IP belirtilmedi: yalnizca localhost erisebilir. Uzak erisim icin guvenli tunel kullanin." -ForegroundColor Yellow
+        New-NetFirewallRule -DisplayName "MT5 Bot Paneli" -Direction Inbound -Protocol TCP -LocalPort $PANEL_PORT -Action Allow | Out-Null
     }
-    Tamam "Panel portu $PANEL_PORT acildi (izin verilen kaynak: $IP_KISIT)"
+    Tamam "Panel portu $PANEL_PORT acildi"
 
     Adim 7 "Otomatik calisma gorevleri"
     foreach ($is in @(@{Ad="MT5ScalperBot"; Dosya="baslat.bat"; Betik="bot.py"; Log="bot_konsol.log"; Bekle=30},
@@ -204,10 +195,9 @@ goto dongu
     try { Invoke-WebRequest -Uri "http://127.0.0.1:$PANEL_PORT" -UseBasicParsing -TimeoutSec 5 | Out-Null; $panelOk = $true } catch { }
 
     $disIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } | Select-Object -First 1).IPAddress
-    $panelAdresi = if ($IP_KISIT -eq "127.0.0.1") { "http://127.0.0.1:$PANEL_PORT (uzak erisim icin guvenli tunel kullanin)" } else { "http://$($disIp):$PANEL_PORT" }
     $bilgi = @"
 MT5 BOT PANELI
-Adres : $panelAdresi
+Adres : http://$($disIp):$PANEL_PORT
 Sifre : $PANEL_SIFRE
 (Bu dosyayi sifreyi bir yere not ettikten sonra silin.)
 "@
@@ -220,7 +210,7 @@ Sifre : $PANEL_SIFRE
     Write-Host "==============================================" -ForegroundColor Green
     Write-Host $bilgi -ForegroundColor White
     if (-not $panelOk) { Write-Host "Panel henuz yanit vermedi; 1 dakika sonra adresi deneyin. Sorun olursa C:\mt5bot\panel.log dosyasina bakin." -ForegroundColor Yellow }
-    if (-not $MT5_LOGIN) { Write-Host "MT5 hesap bilgisi girilmedi: C:\mt5bot\config.py dosyasini doldurun, bot kendiliginden baglanir." -ForegroundColor Yellow }
+    if (-not $MT5_LOGIN) { Write-Host "Simdi panele girip 'Ayarlar' sekmesinden MT5 hesap bilgilerinizi yazin; bot kendiliginden baglanir." -ForegroundColor Yellow }
     Write-Host "Bilgiler masaustundeki PANEL_BILGI.txt dosyasina da yazildi." -ForegroundColor Cyan
     if ($OTO -and $env:K_YENIDEN_BASLAT -eq "1" -and $otoOturum) {
         Write-Host "Sunucu 1 dakika icinde yeniden baslatiliyor; acilinca bot ve panel kendiliginden calisacak." -ForegroundColor Cyan
