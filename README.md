@@ -29,6 +29,8 @@ python app.py --game "Elden Ring" --platform "PC" --mode meta --output json
 python app.py --game "Stardew Valley" --platform "PC" --mode all
 ```
 
+`--output json` kullanırken çıktı seçilen `--mode` ile birebir eşleşir (`plan`, `script`, `meta` veya `all`).
+
 ## Test
 
 ```bash

@@ -7,8 +7,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from content_automation import generate_content_plan, render_markdown
-from video_workflow import build_output, generate_workflow_output
+from video_workflow import build_output, generate_workflow_output, select_workflow_payload
 
 
 def parse_args() -> argparse.Namespace:
@@ -63,7 +62,7 @@ def main() -> int:
             duration_minutes=args.duration,
             api_key=api_key,
         )
-        print(json.dumps(workflow, ensure_ascii=False, indent=2))
+        print(json.dumps(select_workflow_payload(workflow, args.mode), ensure_ascii=False, indent=2))
         return 0
 
     output = build_output(
