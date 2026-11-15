@@ -51,13 +51,14 @@ Write-Host "[4/6] Panel sifresi ve portu..." -ForegroundColor Yellow
 $PORT = (Get-Content "$BOT_DIR\panel_ayar.json" -Raw | ConvertFrom-Json).port
 
 Write-Host "[5/6] Guvenlik duvari..." -ForegroundColor Yellow
-$ip = Read-Host "     Panele yalnizca belirli bir IP'den mi erisilsin? (IP yazin, herkese acik icin bos birakin)"
-Get-NetFirewallRule -DisplayName "MT5 Bot Paneli" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-if ($ip) {
-    New-NetFirewallRule -DisplayName "MT5 Bot Paneli" -Direction Inbound -Protocol TCP -LocalPort $PORT -RemoteAddress $ip -Action Allow | Out-Null
-} else {
-    New-NetFirewallRule -DisplayName "MT5 Bot Paneli" -Direction Inbound -Protocol TCP -LocalPort $PORT -Action Allow | Out-Null
+Write-Host "     Panel HTTP kullanir; uzaktan erisim icin HTTPS proxy veya SSH/RDP tuneli kullanin." -ForegroundColor Yellow
+$ip = (Read-Host "     Panele yalnizca belirli bir IP'den mi erisilsin? (Bos birakilirsa yalnizca localhost)").Trim()
+if (-not $ip) {
+    $ip = "127.0.0.1"
+    Write-Host "     Bos birakildi: yalnizca localhost erisebilir. Uzak erisim icin guvenli bir tunel kullanin." -ForegroundColor Yellow
 }
+Get-NetFirewallRule -DisplayName "MT5 Bot Paneli" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+New-NetFirewallRule -DisplayName "MT5 Bot Paneli" -Direction Inbound -Protocol TCP -LocalPort $PORT -RemoteAddress $ip -Action Allow | Out-Null
 
 Write-Host "[6/6] Otomatik baslatma..." -ForegroundColor Yellow
 @"
@@ -82,7 +83,8 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
 $disIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } | Select-Object -First 1).IPAddress
+$panelAdresi = if ($ip -eq "127.0.0.1") { "http://127.0.0.1:$PORT (uzak erisim icin guvenli tunel kullanin)" } else { "http://$($disIp):$PORT" }
 Write-Host ""
 Write-Host "KURULUM TAMAMLANDI" -ForegroundColor Green
-Write-Host "Panel adresi: http://$($disIp):$PORT" -ForegroundColor Green
+Write-Host "Panel adresi: $panelAdresi" -ForegroundColor Green
 Write-Host "Tarayicidan bu adrese girip belirlediginiz sifreyle oturum acin." -ForegroundColor Magenta

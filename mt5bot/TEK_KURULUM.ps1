@@ -60,13 +60,13 @@ if ($OTO) {
     $MT5_SUNUCU = Read-Host "3) MT5 sunucu adi (or: GCM-Demo)"
     $GEMINI     = Read-Host "4) Gemini API anahtari (yoksa Enter; yerel yapay zeka kurulur)"
     $TG         = Read-Host "5) Telegram bot token (yoksa Enter)"
-    $IP_KISIT   = Read-Host "6) Panele sadece su IP'den erisilsin (onerilir; herkese acik icin Enter)"
+    $IP_KISIT   = Read-Host "6) Panele sadece su IP'den erisilsin (bos birakilirsa yalnizca localhost)"
     Write-Host "7) Sunucu yeniden baslarsa her seyin kendiliginden acilmasi icin Windows"
     $WIN_SIFRE  = DuzMetin (Read-Host "   Administrator sifresini girin (istemiyorsaniz Enter)" -AsSecureString)
 }
 
 $harfler = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
-$PANEL_SIFRE = -join (1..14 | ForEach-Object { $harfler[(Get-Random -Maximum $harfler.Length)] })
+$PANEL_SIFRE = -join (1..14 | ForEach-Object { $harfler[[System.Security.Cryptography.RandomNumberGenerator]::GetInt32($harfler.Length)] })
 $PANEL_PORT = 8080
 
 Write-Host "`nTesekkurler. Kurulum basliyor, bilgisayarin basindan kalkabilirsiniz." -ForegroundColor Cyan
@@ -151,12 +151,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Panel ayarlanamadi." }
     Remove-Item Env:PANEL_SIFRE, Env:GEMINI_ANAHTAR -ErrorAction SilentlyContinue
     Get-NetFirewallRule -DisplayName "MT5 Bot Paneli" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    Write-Host "      Panel HTTP kullanir; uzaktan erisim icin HTTPS proxy veya SSH/RDP tuneli kullanin." -ForegroundColor Yellow
+    $IP_KISIT = "$IP_KISIT".Trim()
     if ($IP_KISIT) {
         New-NetFirewallRule -DisplayName "MT5 Bot Paneli" -Direction Inbound -Protocol TCP -LocalPort $PANEL_PORT -RemoteAddress $IP_KISIT -Action Allow | Out-Null
     } else {
-        New-NetFirewallRule -DisplayName "MT5 Bot Paneli" -Direction Inbound -Protocol TCP -LocalPort $PANEL_PORT -Action Allow | Out-Null
+        $IP_KISIT = "127.0.0.1"
+        New-NetFirewallRule -DisplayName "MT5 Bot Paneli" -Direction Inbound -Protocol TCP -LocalPort $PANEL_PORT -RemoteAddress $IP_KISIT -Action Allow | Out-Null
+        Write-Host "      IP belirtilmedi: yalnizca localhost erisebilir. Uzak erisim icin guvenli tunel kullanin." -ForegroundColor Yellow
     }
-    Tamam "Panel portu $PANEL_PORT acildi"
+    Tamam "Panel portu $PANEL_PORT acildi (izin verilen kaynak: $IP_KISIT)"
 
     Adim 7 "Otomatik calisma gorevleri"
     foreach ($is in @(@{Ad="MT5ScalperBot"; Dosya="baslat.bat"; Betik="bot.py"; Log="bot_konsol.log"; Bekle=30},
@@ -200,9 +204,10 @@ goto dongu
     try { Invoke-WebRequest -Uri "http://127.0.0.1:$PANEL_PORT" -UseBasicParsing -TimeoutSec 5 | Out-Null; $panelOk = $true } catch { }
 
     $disIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } | Select-Object -First 1).IPAddress
+    $panelAdresi = if ($IP_KISIT -eq "127.0.0.1") { "http://127.0.0.1:$PANEL_PORT (uzak erisim icin guvenli tunel kullanin)" } else { "http://$($disIp):$PANEL_PORT" }
     $bilgi = @"
 MT5 BOT PANELI
-Adres : http://$($disIp):$PANEL_PORT
+Adres : $panelAdresi
 Sifre : $PANEL_SIFRE
 (Bu dosyayi sifreyi bir yere not ettikten sonra silin.)
 "@

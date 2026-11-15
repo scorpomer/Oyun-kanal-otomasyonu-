@@ -160,6 +160,8 @@ RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
+    PANEL_HOST=127.0.0.1
+    if [ -n "$C_IP_KISIT" ] && systemctl is-active -q firewalld; then PANEL_HOST=0.0.0.0; fi
     cat > /etc/systemd/system/mt5-panel.service <<EOF
 [Unit]
 Description=MT5 bot web paneli
@@ -167,6 +169,7 @@ After=network-online.target
 [Service]
 User=$KULLANICI
 WorkingDirectory=$DIZIN
+Environment=PANEL_HOST=$PANEL_HOST
 ExecStart=$DIZIN/venv/bin/python panel.py
 Restart=always
 RestartSec=10
@@ -195,7 +198,7 @@ Description=MT5 ekrani tarayici erisimi (noVNC)
 After=mt5-vnc.service
 [Service]
 User=$KULLANICI
-ExecStart=/usr/bin/websockify --web $NOVNC_WEB $VNC_PORT localhost:5900
+ExecStart=/usr/bin/websockify --web $NOVNC_WEB 127.0.0.1:$VNC_PORT localhost:5900
 Restart=always
 [Install]
 WantedBy=multi-user.target
@@ -209,29 +212,34 @@ EOF
     adim 10 "Guvenlik duvari"
     PORTLAR="$PANEL_PORT"; [ "$VNC" = "E" ] && PORTLAR="$PORTLAR $VNC_PORT"
     if systemctl is-active -q firewalld; then
-        for p in $PORTLAR; do
-            if [ -n "$C_IP_KISIT" ]; then
+        if [ -n "$C_IP_KISIT" ]; then
+            for p in $PORTLAR; do
                 firewall-cmd -q --permanent --add-rich-rule="rule family=ipv4 source address=$C_IP_KISIT port port=$p protocol=tcp accept"
-            else
-                firewall-cmd -q --permanent --add-port=$p/tcp
-            fi
-        done
-        firewall-cmd -q --reload && tamam "firewalld: $PORTLAR acildi"
+            done
+            firewall-cmd -q --reload && tamam "firewalld: $PORTLAR yalnizca $C_IP_KISIT icin acildi"
+        else
+            echo -e "      ${S}IP kisiti belirtilmedi; portlar firewalld'da acilmadi. Uzak erisim icin IP allowlist veya SSH tuneli kullanin.${N}"
+        fi
     elif command -v csf >/dev/null; then
-        echo -e "      ${S}CSF guvenlik duvari bulundu: /etc/csf/csf.conf icinde TCP_IN satirina $PORTLAR ekleyip 'csf -r' calistirin.${N}"
+        echo -e "      ${S}CSF guvenlik duvari bulundu; kurulum port acmadi. Kaynak IP kisitlamasi veya SSH tuneli kullanin.${N}"
     else
-        tamam "Aktif guvenlik duvari yok, portlar zaten acik"
+        echo -e "      ${S}Aktif guvenlik duvari yok. Portlari genel erisime acmayin; kaynak IP kisitlamasi veya SSH tuneli kullanin.${N}"
     fi
 
     sleep 5
     PANEL_DURUM="yanit vermiyor"; curl -fs -o /dev/null http://127.0.0.1:$PANEL_PORT && PANEL_DURUM="calisiyor"
     DIS_IP=$(curl -fs --max-time 5 https://api.ipify.org || hostname -I | awk '{print $1}')
+    if [ "$PANEL_HOST" = "127.0.0.1" ]; then
+        PANEL_ADRES="http://127.0.0.1:$PANEL_PORT (SSH tuneli kullanin)"
+    else
+        PANEL_ADRES="http://$DIS_IP:$PANEL_PORT (HTTP sifrelenmez; SSH tuneli veya HTTPS kullanin)"
+    fi
     {
         echo "MT5 BOT PANELI"
-        echo "Panel adresi : http://$DIS_IP:$PANEL_PORT   ($PANEL_DURUM)"
+        echo "Panel adresi : $PANEL_ADRES   ($PANEL_DURUM)"
         echo "Panel sifresi: $C_PANEL_SIFRE"
         if [ "$VNC" = "E" ]; then
-            echo "MT5 ekrani   : http://$DIS_IP:$VNC_PORT/vnc.html"
+            echo "MT5 ekrani   : http://127.0.0.1:$VNC_PORT/vnc.html (SSH tuneli kullanin)"
             echo "Ekran sifresi: $C_VNC_SIFRE"
         fi
         echo "Bu dosya: $BILGI (sifreleri not edip silebilirsiniz)"
@@ -264,7 +272,7 @@ read -rsp "2) MT5 sifresi: " C_MT5_SIFRE; echo
 read -rp "3) MT5 sunucu adi (or: GCM-Demo): " C_MT5_SUNUCU
 read -rp "4) Gemini API anahtari (yoksa Enter): " C_GEMINI
 read -rp "5) Telegram bot token (yoksa Enter): " C_TG
-read -rp "6) Panele sadece su IP'den erisilsin (bos = herkese acik): " C_IP_KISIT
+read -rp "6) Panele sadece su IP'den erisilsin (bos birakilirsa yalnizca localhost): " C_IP_KISIT
 read -rp "7) MT5 ekranini tarayicidan gormek ister misiniz? Broker girisi icin faydali (E/h) [E]: " VNC
 VNC=$([ "${VNC,,}" = "h" ] && echo H || echo E)
 YEREL_AI=H
