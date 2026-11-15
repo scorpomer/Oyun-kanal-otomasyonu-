@@ -7,8 +7,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from content_automation import generate_content_plan, render_markdown
-from video_workflow import build_output, generate_workflow_output
+from video_workflow import generate_workflow_output, render_text_output, select_json_output
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,8 +52,7 @@ def main() -> int:
     args = parse_args()
 
     api_key = os.getenv("GOOGLE_API_KEY")
-
-    if args.output == "json":
+    try:
         workflow = generate_workflow_output(
             game_name=args.game,
             platform=args.platform,
@@ -63,19 +61,14 @@ def main() -> int:
             duration_minutes=args.duration,
             api_key=api_key,
         )
-        print(json.dumps(workflow, ensure_ascii=False, indent=2))
-        return 0
+    except ValueError as exc:
+        print(f"Hata: {exc}", file=sys.stderr)
+        return 2
 
-    output = build_output(
-        mode=args.mode,
-        game=args.game,
-        platform=args.platform,
-        style=args.style,
-        tone=args.tone,
-        duration=args.duration,
-        api_key=api_key,
-    )
-    print(output)
+    if args.output == "json":
+        print(json.dumps(select_json_output(workflow, args.mode), ensure_ascii=False, indent=2))
+    else:
+        print(render_text_output(workflow, args.mode))
     return 0
 
 

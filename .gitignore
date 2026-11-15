@@ -1,0 +1,24 @@
+# Gizli bilgiler
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Sanal ortamlar
+.venv/
+venv/
+env/
+
+# Üretilen çıktılar
+output/
+
+# Editör / sistem dosyaları
+.vscode/
+.idea/
+.DS_Store
+.ipynb_checkpoints/

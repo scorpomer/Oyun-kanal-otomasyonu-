@@ -1,6 +1,12 @@
+from __future__ import annotations
+
 import json
+import os
 import re
+import sys
 from typing import Any, Dict
+
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 
 
 def build_local_plan(
@@ -52,14 +58,26 @@ def build_local_plan(
 
 
 def _extract_json_payload(text: str) -> Dict[str, Any]:
-    if not text:
+    """Model yanıtından JSON nesnesini çıkarır; ```json bloklarını ve çevre metni tolere eder."""
+    if not text or not text.strip():
         raise ValueError("Boş model yanıtı.")
 
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    cleaned = text.strip()
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL | re.IGNORECASE)
     if match:
-        text = match.group(1)
+        cleaned = match.group(1).strip()
 
-    return json.loads(text)
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        payload = json.loads(cleaned[start : end + 1])
+
+    if not isinstance(payload, dict):
+        raise ValueError("Model JSON nesnesi döndürmedi.")
+    return payload
 
 
 def generate_content_plan(
@@ -70,6 +88,11 @@ def generate_content_plan(
     duration_minutes: int,
     api_key: str | None = None,
 ) -> Dict[str, Any]:
+    if not game_name or not game_name.strip():
+        raise ValueError("Oyun adı boş bırakılamaz.")
+    if duration_minutes < 1:
+        raise ValueError("Video süresi en az 1 dakika olmalı.")
+
     plan = build_local_plan(game_name, platform, style, tone, duration_minutes)
 
     if not api_key:
@@ -100,21 +123,31 @@ def generate_content_plan(
         """
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=os.getenv("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL,
             contents=prompt,
         )
         raw_text = getattr(response, "text", None) or str(response)
         payload = _extract_json_payload(raw_text)
 
-        if not isinstance(payload, dict):
-            raise ValueError("Model JSON olarak değil, farklı format döndürdü.")
+        # Modelin eksik ya da hatalı döndürdüğü alanları yerel plandan tamamla.
+        for key in ("title", "hook", "summary", "cta"):
+            if not isinstance(payload.get(key), str) or not payload[key].strip():
+                payload[key] = plan[key]
+        for key in ("outline", "shot_list", "seo_tags"):
+            value = payload.get(key)
+            if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                payload[key] = plan[key]
 
         payload.setdefault("platform", platform)
         payload.setdefault("style", style)
         payload.setdefault("tone", tone)
         payload.setdefault("duration_minutes", duration_minutes)
         return payload
-    except Exception:
+    except Exception as exc:
+        print(
+            f"Uyarı: Gemini ile plan üretilemedi, yerel yedek plan kullanılıyor ({exc}).",
+            file=sys.stderr,
+        )
         return plan
 
 
