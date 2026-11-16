@@ -89,6 +89,24 @@ def generate_workflow_output(
     }
 
 
+def select_workflow_payload(workflow: Dict[str, Any], mode: str) -> Dict[str, Any]:
+    if mode == "plan":
+        return {"plan": workflow["plan"]}
+    if mode == "script":
+        return {
+            "script_lines": workflow["script_lines"],
+            "script_text": workflow["script_text"],
+        }
+    if mode == "meta":
+        return {
+            "youtube_meta": workflow["youtube_meta"],
+            "youtube_meta_text": workflow["youtube_meta_text"],
+        }
+    if mode == "all":
+        return workflow
+    raise ValueError(f"Geçersiz mode: {mode}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="YouTube oyun kanalı için yapay zeka içerik otomasyonu."
@@ -145,9 +163,12 @@ def build_output(mode: str, game: str, platform: str, style: str, tone: str, dur
     if mode == "meta":
         return workflow["youtube_meta_text"]
 
-    return (
-        render_markdown(workflow["plan"]) + "\n\n---\n\n" + workflow["script_text"] + "\n\n---\n\n" + workflow["youtube_meta_text"]
-    )
+    if mode == "all":
+        return (
+            render_markdown(workflow["plan"]) + "\n\n---\n\n" + workflow["script_text"] + "\n\n---\n\n" + workflow["youtube_meta_text"]
+        )
+
+    raise ValueError(f"Geçersiz mode: {mode}")
 
 
 def main() -> int:
@@ -155,16 +176,6 @@ def main() -> int:
     args = parse_args()
 
     api_key = os.getenv("GOOGLE_API_KEY")
-    output = build_output(
-        mode=args.mode,
-        game=args.game,
-        platform=args.platform,
-        style=args.style,
-        tone=args.tone,
-        duration=args.duration,
-        api_key=api_key,
-    )
-
     if args.output == "json":
         workflow = generate_workflow_output(
             game_name=args.game,
@@ -174,8 +185,18 @@ def main() -> int:
             duration_minutes=args.duration,
             api_key=api_key,
         )
-        print(json.dumps(workflow, ensure_ascii=False, indent=2))
+        print(json.dumps(select_workflow_payload(workflow, args.mode), ensure_ascii=False, indent=2))
         return 0
+
+    output = build_output(
+        mode=args.mode,
+        game=args.game,
+        platform=args.platform,
+        style=args.style,
+        tone=args.tone,
+        duration=args.duration,
+        api_key=api_key,
+    )
 
     print(output)
     return 0
@@ -193,5 +214,6 @@ __all__ = [
     "build_script_lines",
     "build_youtube_metadata",
     "generate_workflow_output",
+    "select_workflow_payload",
     "build_output",
 ]

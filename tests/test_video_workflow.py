@@ -3,6 +3,7 @@ from video_workflow import (
     build_script_lines,
     build_youtube_metadata,
     generate_workflow_output,
+    select_workflow_payload,
 )
 
 
@@ -61,3 +62,18 @@ def test_build_output_supports_all_modes():
     assert build_output(mode="script", **common).startswith("1.")
     assert build_output(mode="meta", **common).startswith("Title:")
     assert "\n\n---\n\n" in build_output(mode="all", **common)
+
+
+def test_select_workflow_payload_respects_mode():
+    workflow = generate_workflow_output(
+        game_name="CS2",
+        platform="PC",
+        style="hızlı",
+        tone="heyecanlı",
+        duration_minutes=8,
+        api_key=None,
+    )
+    assert set(select_workflow_payload(workflow, "plan").keys()) == {"plan"}
+    assert set(select_workflow_payload(workflow, "script").keys()) == {"script_lines", "script_text"}
+    assert set(select_workflow_payload(workflow, "meta").keys()) == {"youtube_meta", "youtube_meta_text"}
+    assert set(select_workflow_payload(workflow, "all").keys()) == set(workflow.keys())
