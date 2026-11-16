@@ -7,11 +7,11 @@ import sys
 
 from dotenv import load_dotenv
 
-from content_automation import generate_content_plan, render_markdown
-from video_workflow import build_output, generate_workflow_output
+from content_automation import load_channel_profile
+from video_workflow import MODES, generate_workflow_output, render_text_output, save_package, select_json_output
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None, default_mode: str = "plan") -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="YouTube oyun kanalı için yapay zeka içerik otomasyonu."
     )
@@ -41,20 +41,22 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["plan", "script", "meta", "all"],
-        default="plan",
-        help="Üretilecek içerik tipi",
+        choices=MODES,
+        default=default_mode,
+        help="Ekranda gösterilecek içerik: plan, script, meta, thumbnail, shorts veya all",
     )
-    return parser.parse_args()
+    parser.add_argument("--kanal", default=None, help="Kanal profili dosyası (varsayılan: kanal.json)")
+    parser.add_argument("--output-dir", default="output", help="Paketin kaydedileceği klasör (varsayılan: output)")
+    parser.add_argument("--no-save", action="store_true", help="Dosyaya kaydetme, sadece ekrana yaz")
+    return parser.parse_args(argv)
 
 
-def main() -> int:
+def main(argv=None, default_mode: str = "plan") -> int:
     load_dotenv()
-    args = parse_args()
+    args = parse_args(argv, default_mode)
 
     api_key = os.getenv("GOOGLE_API_KEY")
-
-    if args.output == "json":
+    try:
         workflow = generate_workflow_output(
             game_name=args.game,
             platform=args.platform,
@@ -62,20 +64,20 @@ def main() -> int:
             tone=args.tone,
             duration_minutes=args.duration,
             api_key=api_key,
+            channel=load_channel_profile(args.kanal),
         )
-        print(json.dumps(workflow, ensure_ascii=False, indent=2))
-        return 0
+    except ValueError as exc:
+        print(f"Hata: {exc}", file=sys.stderr)
+        return 2
 
-    output = build_output(
-        mode=args.mode,
-        game=args.game,
-        platform=args.platform,
-        style=args.style,
-        tone=args.tone,
-        duration=args.duration,
-        api_key=api_key,
-    )
-    print(output)
+    if not args.no_save:
+        destination = save_package(workflow, args.output_dir)
+        print(f"İçerik paketi kaydedildi: {destination}", file=sys.stderr)
+
+    if args.output == "json":
+        print(json.dumps(select_json_output(workflow, args.mode), ensure_ascii=False, indent=2))
+    else:
+        print(render_text_output(workflow, args.mode))
     return 0
 
 

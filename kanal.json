@@ -1,0 +1,11 @@
+{
+  "kanal_adi": "Oyun Kanalı",
+  "hedef_kitle": "Türkçe konuşan, yeni oyunları merak eden oyuncular",
+  "sunucu": {
+    "ad": "Kaptan",
+    "kisilik": "esprili, samimi ve oyunları dürüstçe değerlendiren bir oyuncu",
+    "selamlama": "Merhaba arkadaşlar!",
+    "kapanis": "Bir sonraki videoda görüşmek üzere, iyi oyunlar!"
+  },
+  "sabit_etiketler": ["oyun", "Türkçe oyun"]
+}
